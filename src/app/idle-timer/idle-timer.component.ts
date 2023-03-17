@@ -32,7 +32,8 @@ export class IdleTimerComponent implements OnInit {
 
   private sub!: Subscription;
 
-  constructor(private dialog: MatDialog, private _ngZone: NgZone) {}
+  constructor(private dialog: MatDialog, private _ngZone: NgZone) {
+  }
 
   ngOnInit(): void {
     console.log('Timeout in', this.timeoutSeconds, 'seconds. Grace period', this.graceSeconds, 'seconds');
@@ -47,11 +48,11 @@ export class IdleTimerComponent implements OnInit {
       }
 
       const activityDetected$ = merge(
-        fromEvent(window, 'keypress' ).pipe(map(() => true)),
+        fromEvent(window, 'keypress').pipe(map(() => true)),
         fromEvent(window, 'mousemove').pipe(map(() => true)),
-        fromEvent(window, 'scroll'   ).pipe(map(() => true)),
-        fromEvent(window, 'wheel'    ).pipe(map(() => true)),
-        fromEvent(window, 'click'    ).pipe(map(() => true)),
+        fromEvent(window, 'scroll').pipe(map(() => true)),
+        fromEvent(window, 'wheel').pipe(map(() => true)),
+        fromEvent(window, 'click').pipe(map(() => true)),
       ).pipe(
         debounceTime(this.debounceSeconds),
       );
@@ -63,15 +64,14 @@ export class IdleTimerComponent implements OnInit {
         }, this.timeoutSeconds),
         takeWhile(val => val >= 0),
         takeUntil(activityDetected$),
-
       ).subscribe({
         next: (value) => {
-            if (!value) {
-              this._ngZone.run(() => {
-                this.showDialog();
-              });
-            }
-          },
+          if (!value) {
+            this._ngZone.run(() => {
+              this.showDialog();
+            });
+          }
+        },
         error: (error: any) => {
           console.log('error', error)
         },
@@ -98,8 +98,6 @@ export class IdleTimerComponent implements OnInit {
     });
 
     dialogRef.afterClosed().subscribe(keepSignedIn => {
-      console.log('The dialog was closed. Requested to keep session alive:', keepSignedIn);
-
       if (keepSignedIn) {
         // if user wants to stay signed in, then restart timer for a brand-new iteration
         this.startTimer();
@@ -134,9 +132,9 @@ export interface DialogData {
 export class IdleTimeoutDialogComponent {
 
   /** the number of seconds the user remained inactive - will be shown on the popup dialog */
-  private seconds: number;
+  seconds: number;
   /** the number of seconds the user has left to decide if he chooses to stay logged in */
-  private grace: number;
+  grace: number;
   private sub: Subscription;
 
   constructor(
@@ -144,7 +142,7 @@ export class IdleTimeoutDialogComponent {
     @Inject(MAT_DIALOG_DATA) data: DialogData) {
 
     this.seconds = data.seconds;
-    this.grace   = data.grace;
+    this.grace = data.grace;
 
     this.sub = interval(1000).pipe(
       map(() => -1),
@@ -153,17 +151,12 @@ export class IdleTimeoutDialogComponent {
       }, this.grace),
       takeWhile(val => val >= 0),
 
-    ).subscribe({
-        next: (value) => {
-          if (!value) {
-            this.dialogRef.close();
-          } else {
-            this.grace = value;
-          }
-        },
-        error: (error) => console.log(error),
-        complete: () => {
-          console.log('completed grace period')
+    ).subscribe(
+      (value) => {
+        if (!value) {
+          this.dialogRef.close();
+        } else {
+          this.grace = value;
         }
       }
     );
