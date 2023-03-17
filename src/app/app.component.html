@@ -2,4 +2,4 @@
 
 <p>This is the idle timer demo</p>
 
-<app-idle-timer [minutes]="15"></app-idle-timer>
+<app-idle-timer [timeoutSeconds]="8" (onTimeout)="onTimeout()"></app-idle-timer>

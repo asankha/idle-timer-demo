@@ -1,105 +1,89 @@
-import {Component, Inject, Input, NgZone, OnInit} from '@angular/core';
-import {MAT_DIALOG_DATA, MatDialog, MatDialogConfig, MatDialogRef} from "@angular/material/dialog";
+import {Component, EventEmitter, Inject, Input, NgZone, OnInit, Output} from '@angular/core';
+import {MAT_DIALOG_DATA, MatDialog, MatDialogRef} from "@angular/material/dialog";
 import {
   debounceTime,
   fromEvent,
   merge,
   Observable,
-  timeout,
   map,
   tap,
   interval,
-  take,
   scan,
   takeWhile,
-  takeUntil, switchMap, empty, startWith, of, Subscription
+  takeUntil, Subscription
 } from "rxjs";
 
 @Component({
   selector: 'app-idle-timer',
-  template: `
-    <p>idle-timer works! {{ count }}</p>
-    <button mat-button (click)="startTimer()">Start Timer</button>
-    <button mat-button (click)="stopTimer()">Stop Timer</button>
-    <button mat-button (click)="showDialog()">Open dialog</button>
-  `
+  template: ``
 })
 export class IdleTimerComponent implements OnInit {
 
+  /** the number of seconds the user is allowed to remain inactive, before being asked */
   @Input()
-  minutes: number = 10;
+  timeoutSeconds: number = 60;
+  /** the number of seconds the user is given to choose if he wishes to stay logged in */
+  @Input()
+  graceSeconds: number = 15;
+  /** number of seconds to batch activity events for debouncing */
+  @Input()
+  debounceSeconds: number = 10;
+  @Output() onTimeout = new EventEmitter<number>();
 
-  count: number = 0;
-  counter$ = interval(1000);
-  activityDetected$!: Observable<boolean>;
+  private sub!: Subscription;
 
-  sub!: Subscription;
-
-  constructor(private dialog: MatDialog, private _ngZone: NgZone) {
-  }
+  constructor(private dialog: MatDialog, private _ngZone: NgZone) {}
 
   ngOnInit(): void {
-    console.log('Initializing timeout component for ', this.minutes, 'seconds');
+    console.log('Timeout in', this.timeoutSeconds, 'seconds. Grace period', this.graceSeconds, 'seconds');
     this.startTimer();
   }
 
   startTimer() {
-    //console.log('startTimer()');
-
     this._ngZone.runOutsideAngular(() => {
-      //console.log('setting up subscription');
-
-      this.activityDetected$ = merge(
-        fromEvent(document, 'wheel').pipe(map(() => true)),
-        fromEvent(document, 'click').pipe(map(() => true)),
-        fromEvent(document, 'mousemove').pipe(map(() => true)),
-      ).pipe(
-        tap((t) => console.log('.')),
-        debounceTime(2000),
-        tap((t) => console.log('activity detected in the last 2 seconds'))
-      );
 
       if (this.sub) {
         this.sub.unsubscribe();
       }
 
-      this.sub = this.counter$.pipe(
+      const activityDetected$ = merge(
+        fromEvent(window, 'keypress' ).pipe(map(() => true)),
+        fromEvent(window, 'mousemove').pipe(map(() => true)),
+        fromEvent(window, 'scroll'   ).pipe(map(() => true)),
+        fromEvent(window, 'wheel'    ).pipe(map(() => true)),
+        fromEvent(window, 'click'    ).pipe(map(() => true)),
+      ).pipe(
+        debounceTime(this.debounceSeconds),
+      );
+
+      this.sub = interval(1000).pipe(
         map(() => -1),
         scan((acc, cur) => {
           return acc + cur;
-        }, 15),
+        }, this.timeoutSeconds),
         takeWhile(val => val >= 0),
-        tap((v) => console.log('count', v)),
-        takeUntil(this.activityDetected$),
+        takeUntil(activityDetected$),
 
       ).subscribe({
         next: (value) => {
-            //console.log('next', value);
             if (!value) {
-              console.log('Lift off');
               this._ngZone.run(() => {
                 this.showDialog();
               });
-
             }
           },
         error: (error: any) => {
           console.log('error', error)
         },
         complete: () => {
-          console.log('complete');
           this.startTimer();
         }
       });
     });
   }
 
-  stopTimer() {
-    this.sub.unsubscribe();
-  }
-
   showDialog() {
-    this.stopTimer();
+    this.sub.unsubscribe();
 
     const dialogRef = this.dialog.open(IdleTimeoutDialogComponent, {
       disableClose: true,
@@ -108,50 +92,84 @@ export class IdleTimerComponent implements OnInit {
       width: '600px',
       position: {top: '100px'},
       data: {
-        minutes: this.minutes
+        seconds: this.timeoutSeconds,
+        grace: this.graceSeconds,
       }
     });
 
     dialogRef.afterClosed().subscribe(keepSignedIn => {
-      console.log('The dialog was closed', keepSignedIn);
-      //if (keepSignedIn) {
+      console.log('The dialog was closed. Requested to keep session alive:', keepSignedIn);
+
+      if (keepSignedIn) {
+        // if user wants to stay signed in, then restart timer for a brand-new iteration
         this.startTimer();
-      //}
+      } else {
+        // if user chose to sign out, or if the grace period ran out, emit onTimeout() to let parent know
+        this.onTimeout.emit();
+      }
     });
   }
 }
 
 export interface DialogData {
-  minutes: number;
+  seconds: number;
+  grace: number;
 }
 
 @Component({
   selector: 'dialog-overview-example-dialog',
   template: `
-    <h2 mat-dialog-title>Idle Session</h2>
+    <h2 mat-dialog-title>Your session has been idle for {{ seconds }} seconds</h2>
     <mat-dialog-content>
       <span class="content-span full-width">
-        Your session has been idle for {{ minutes }} minutes.
-        Do you want to keep signed in?
+        You will be automatically logged off in {{ grace }} seconds.
       </span>
     </mat-dialog-content>
     <mat-dialog-actions>
       <button mat-button [mat-dialog-close]="false">Sign me out</button>
-      <button mat-button [mat-dialog-close]="true">Keep me signed in</button>
+      <button mat-button [mat-dialog-close]="true" (click)="onClose()">Keep me signed in</button>
     </mat-dialog-actions>
   `
 })
 export class IdleTimeoutDialogComponent {
 
-  minutes: number;
+  /** the number of seconds the user remained inactive - will be shown on the popup dialog */
+  private seconds: number;
+  /** the number of seconds the user has left to decide if he chooses to stay logged in */
+  private grace: number;
+  private sub: Subscription;
 
   constructor(
-    public dialogRef: MatDialogRef<IdleTimeoutDialogComponent>,
-    @Inject(MAT_DIALOG_DATA) public data: DialogData) {
-    this.minutes = data.minutes;
+    private dialogRef: MatDialogRef<IdleTimeoutDialogComponent>,
+    @Inject(MAT_DIALOG_DATA) data: DialogData) {
+
+    this.seconds = data.seconds;
+    this.grace   = data.grace;
+
+    this.sub = interval(1000).pipe(
+      map(() => -1),
+      scan((acc, cur) => {
+        return acc + cur;
+      }, this.grace),
+      takeWhile(val => val >= 0),
+
+    ).subscribe({
+        next: (value) => {
+          if (!value) {
+            this.dialogRef.close();
+          } else {
+            this.grace = value;
+          }
+        },
+        error: (error) => console.log(error),
+        complete: () => {
+          console.log('completed grace period')
+        }
+      }
+    );
   }
 
-  closeDialog(): void {
-    this.dialogRef.close();
+  onClose() {
+    this.sub.unsubscribe();
   }
 }
